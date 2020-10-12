@@ -84,6 +84,7 @@ Manage iptables rules to make all pods available through the cluster
 ##### POD
 
 Containers are deployed in a package called pod, to scale the app, we create new pods, a pod contains 1 or more container
+
 Containers on the same pod shares the same network space, they call each other via 127.0.0.1
 Pods are deployed via yaml manifest ot kubectl run command, ex: kubectl run nginx --image nginx:latest
 
@@ -91,10 +92,10 @@ Pods are deployed via yaml manifest ot kubectl run command, ex: kubectl run ngin
 
 Pods can be created via yaml files, a yaml file contains 4 top level fields:
 
-apiVersion 
-kind 
-metadata 
-spec
+* apiVersion 
+* kind 
+* metadata 
+* spec
 
 ex:
 
