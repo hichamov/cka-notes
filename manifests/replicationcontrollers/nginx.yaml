@@ -3,17 +3,17 @@ kind: ReplicationController
 metadata: 
   name: myapp-rc
   labels: 
-	app: myapp
-	type: frontend
+  	app: myapp
+	  type: frontend
 spec:
   - template:
-  	metadata:
+  	 metadata:
   	  name: myapp
   	  labels:
-  		app: myapp         
-  		type: frontend
+  	  	app: myapp         
+  	  	type: frontend
 	  spec:
   	  containers:
-  	    - name: nginx-container
-  	      image: nginx
-      replicas: 3
+  	   - name: nginx-container
+  	     image: nginx
+    replicas: 3
