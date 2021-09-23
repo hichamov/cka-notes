@@ -365,7 +365,7 @@ Are used to record details abouthe the pod, ex: 'buildversion' 'email' ...
 
 * Taints And Tolerations
 
-Used to specify which container can run on what node, taints are set on nodes, and tolerations are set on pods 
+Used to specify which pod can run on what node, taints are set on nodes, and tolerations are set on pods 
 
 ex: taint a node with 'nfs' taint, and add a toleration to nfs pods to tolerate the nfs taint
 
@@ -519,9 +519,6 @@ CPU:
 MEMORY:
 
 1 Mi = 1 Mebibyte = 1,048,576 bytes
-
-Resource Limits: by default, k8s sets a limit of 1 vcpu, and 512 Mi, these limits can be changed in the spec section
-
 
 ```
 apiVersion: v1
@@ -949,8 +946,6 @@ In order to rollback a deployment:
 kubectl rollout undo deployment/deployment-name
 ```
 
-PS: kubectl RUN: this command creates a deployment & not just a pod
-
 Deployments commands cheatsheet:
 
 | Command                                                   | Task                                                          |
@@ -1268,6 +1263,11 @@ Or we can use third party software like 'velero' to backup the cluster
 
 ETCD Cluster: 
 
+First of all, export ETCD API version:
+
+```
+export ETCDCTL_API=3
+```
 We have to backup the datadir of etcd, default is '/var/lib/etcd' 
 
 Or backup the database using the ETCDCTL utility:
@@ -1285,16 +1285,14 @@ ETCDCTL_API=3 etcdctl snapshot status snapshot.db
 To restore the cluster from this backup, stop the kube-apiserver service, then, run the following command
 
 ```
-ETCDCTL_API=3 etcdctl snapshot restore snapshot.db --data-dir /var/lib/etcd-from-backup --initial-cluster master1=https://1.1.1.1:2380,master2=https://2.2.2.2:2380 --initial-cluster-token etcd-cluster-1 initial-advertise-peer-urls https://${INTERNAL_IP}:2380
+ETCDCTL_API=3 etcdctl snapshot restore snapshot.db --data-dir /var/lib/etcd-from-backup 
 ```
 
-NB: the token must be new
-
-& then, edit etcd config file, to use the new data directory and the new token, then reload the etcd service & kube-apiserver
-
-NB: if ssl is used we have to specify the ca, and certificate in the command
+& then, edit etcd config file, to use the new data directory, and make sure you set the new directory at data dir and volume parameters, then reload the etcd service & kube-apiserver
 
 Each way of these two are used in separate environments, for managed services, it's recommended to backup the manifests
+
+EXAM TIP: in the exam, we have to verify that every task we do, was successfully taken.
 
 Persistent volumes
 
@@ -1363,7 +1361,7 @@ Recap of Public Key Infrastructure
 
 * TLS in kubernetes
 
-Naming conventions: certificate (Public keys) must contain .crt or .pem extensions, and private keys must have .key or *-key.pem extensions
+Naming conventions: certificate (Public keys) must contain .crt or .pem extensions, and private keys must have .key or `*-key.pem` extensions
 
 In k8s, all communications between components must be secured via certificates, even the access of the admin
 
@@ -1839,47 +1837,511 @@ spec:
 
 All network solutions support network policies, expet flannel
 
+### Storage
+
+#### Storage in Docker
+
+Layers: When building a docker file, docker creates a layer (folder) for each step, and each step contains only the difference from previous steps, and these layers can be reused in other images to minimize disk consumption and speed image building.
+
+Volume mounting: We can create a volume in docker, which will be stored under `/var/lib/docker/volumes/`.
+
+Binds mounting: We can mount any folder from the docker host rather than docker volumes.
+
+New way to mount volumes in docker:
+
+```
+docker run --mount type=bind,source=/data/mysql,target=/var/lib/mysql mysql 
+```
+
+A storage driver manages the volumes in docker images and continers, ex:
+
+* aufs
+* zfs
+* btrfs
+* Device mapper
+* Overlay
+* Overlay2
+
+Volumes in docker are managed by volume drivers, and not storage drivers, the default one is `local`
+
+Volume Drivers: allows to use external storage management solution, such as aws ebs, glusterfs, Portworx.
+
+#### Container Storage Interface (CSI)
+
+An interface that Storage drivers can use to communicate with kubernetes, storage vendors must respect the definitions of this interface in order for their solutions to work with k8s.
+
+#### Volumes
+
+When a pod gets deleted, all its data is gone, unless we mount a volume, which can be mounted in the next pod created.
+
+To mount a volume in a pod, we need two steps, to specify the the volume, then to specify the mount options, ex:
+
+```
+apiVersion: v1
+kind: Pod
+metadata:
+  name: random
+spec:
+  containers:
+  - image: alpine
+    name: alpine
+    command: ["/bin/sh", "-c"]
+    args: ["shuf -i 0-100 -n 1 >> /opt/number.out"]
+    volumeMounts:
+    - mountPath: /opt
+      name: data-volume
+  volumes:
+  - name: data-volume
+    hostPath: 
+      path: /data
+      type: Directory
+```
+
+The type `hostPath` only works with a single node cluster, if we have  multi node cluster, we need to implement a storage solution such as nfs, glusterfs, amazon ebs ...
+
+#### Persistent volumes
+
+Managing volumes is a tough task, each time we have a new deployment, we need to create the volume manually, and then mount it in the deployment.
+
+Persistent volumes offers the solution to this issue, an administrator can create a lot of `PVs`, and users can create a `Persistent Volume Claim` when they want a volume, and k8s will bind the PVC to the right PV automatically.
+
+ex:
+
+```
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-volume
+spec:
+  accessModes: 
+    - ReadWriteOnce 
+  capacity: 
+    storage: 1Gi
+  hostPath: 
+    path: /tmp/data
+```
+
+The supported values for `accessModes` field are :
+
+  * ReadOnlyMany
+  * ReadWriteOnce
+  * ReadWriteMany
+
+And they describe how the pv is mounted to the pod.  
+
+#### Persistent Volume Claims
+
+Now that we have provisioned the persistent volumes, we need to create a `claim` (Request) to have the pv mounted on our pod.
+
+Ther's a 1 to 1 relationship between claims and persistent volumes, if a claim of 5Gi gets a pv of 10Gi, no other claim can use the same pv, so the 5Gi left will be unused.
+
+If there are no pv available, the volume claim will remain in a pending state.
+
+ex:
+
+```
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: 
+  name: myclaim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 500Mi
+```
+
+When we delete a `PVC`, we can specify what will happen to the `PV`, by specifying a `persistentVolumeReclaimPolicy` attribute, this is set to `Retain` by default, we can set this to `Delete` if we want the PV to be deleted automatically after deleting the PVC, the final option is to set this value to `Recycle`, in this case the data will be removed when the PVC is deleted, and the PV can be reused by other deployments.
+
+After creating the PVC, we need to use it in our pod definition, ex:
+
+```
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mypod
+spec:
+  containers:
+    - name: myfrontend
+      image: nginx
+      volumeMounts:
+      - mountPath: "/var/www/html"
+        name: mypd
+  volumes:
+    - name: mypd
+      persistentVolumeClaim:
+        claimName: myclaim
+```
+
+#### Storage calsses
+
+When creating a `PV`, in AWS for ex, we have to create the volume manually before creating the PV, that's called `Static provisioning` and when we have tons of volumes, this can be hard to manage.
+
+With `Storage classes`, we can define a provisioner, google cloud provisioner for ex, which will create a volume automatically when we claim for it, this procedure is called `dynamic provisioning`.
+
+To do this, we have to create a storage class, ex:
+
+```
+apiVersion: v1
+kind: storageClass
+metadata:
+  name: google-storage
+provisioner: kubernetes.io/gce-pd
+```
+
+After creating the storage class, we no longer need to create the `PV`, it will be created automatically, and when creating the PVC, we have to reference the storage class we want.
 
 
+### Networking
+
+#### Network Namespaces
+
+Are used in linux to isolate containers at the network level, by default, containers with their own namespaces, cannot see other containers, unless we give them access.
+
+Wehn creating a new network namespace, the container has its own routing & ARP tables, and its own interface, it cannot see the host's interface.
+
+To create a network namespace
+
+```
+ip netns add ns-name
+```
+
+To list the network namespaces
+
+```
+ip netns
+```
+
+To list network interfaces in a specific namespace
+
+```
+ip netns exec ns-name ip link
+```
+
+or
+
+```
+ip -n ns-name link
+```
+
+To connect two namespaces at the network level, we need to create a virtual link `pipe`
+
+```
+ip link add veth-red type veth peer name veth-blue
+```
+
+This command created a link with two virtual interfaces, now we have to attach each interface to its own namespace
+
+```
+ip link set veth-red netns red
+```
+
+And
+
+```
+ip link set veth-blue netns blue
+```
+
+then, we can assign ip addresses to both interfaces
+
+```
+ip -n red addr add 10.10.10.1 dev veth-red
+```
+
+And finally, bring up the interface
+
+```
+ip -n red link set veth-red up
+```
+
+In the case of having multiple namespaces, we need to create a virtual switch and connect it to all namespaces 
+
+To create a virtual bridge:
+
+```
+ip link add vnet0 type bridge
+```
+
+And bring it up
+
+```
+ip link set vnet0 up
+```
+
+To connect namespaces to this virtual bridge, we will create a new virtual link
+
+```
+ip link add veth-red type veth peer add veth-red-br 
+```
+
+To attach the link to the virtual bridge
+
+```
+ip link set veth-red-br master vnet0
+```
+
+we need to add ip addresses to both, the red namespace and the bridge network interface, and turn the devices up
+
+This network remains reachable at the host level, so we cannot reach machines on the LAN from the newly created namespaces, to do so, we have to add a route at the namespaces level, that points to the bridge interface as a gateway.
+
+To make the namespaces able to reach machines outside the host, we have to enable NAT (masquerade).
+
+To make the namespaces racheable from outside the host, we will map ports from the host to the namespace
+
+ex:
+
+```
+iptables -t net -A PREROUTING --dport 80 --to-destination 192.168.1.5:80 -j DNAT
+```
+ 
+#### Docker Networking
+
+When creating a docker container, we have multiple options at the network level:
+
+* None: the container has no network connectivity
+* Host: the container is attached to the host network, no isolation, if we deploy a service that listens on port 80 on the container, it will be available on port 80 on the host.
+* Bridge: A virtual bridge is created, and all newly created containers are attached to it.
+
+Docker uses the same technique to link containers to the virtual bridge, it creates a virtual links that can be listed with `ip a` command.
+
+When mapping a port from the container to the docker host, docker uses iptables to forward traffic from the host to the container.
+
+#### CNI
+
+A standard that defines how networking programms should be developed to solve networking issues in a container runtime environments, these programs are reffered to as `plugins`.
+
+CNI defines a set of responsabilies for container runtimes and plugins, such as:
+
+* Creating a network namespace for each container
+* Attach the container to the namespace
+* Configuration in json format
+
+For the plugin:
+
+* Must support command line args such as ADD/DEL/CHECK
+* Must support paramaters container id, network ns etc...
+* Must manage ip addresses assigement to PODS. 
+* Must return results in a specific format
+
+```
+**** Docker doesn't implement CNI.
+
+**** In the exam, we will be asked to deploy a network plugin, unfortunatly, this can be found in only one place in the documentation `https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/high-availability/#steps-for-the-first-control-plane-node` 
+```
+
+#### POD Networking
+
+When we deploy a multiple node cluster, we need to create a virtual bridge on each node with a specific network address, and each node will have a differenr network address to avoid conflicts, the CNI plugin is responsible for attaching network interface and giving ip address to every pod, kubelet is the component that does this, through network plugins such as flannel or weave.
+
+#### CNI in k8s
+
+CNI specifies how container orchestration tools should manage networking at pod level, and how networking plugins should be, for example, they should contain an `ADD` section to add newly created pods to the network, and a `DEL` section, to delete deleted pods from the network.
+
+The CNI plugin must be called with the component thar creates containers on nodes, which is `kubelet`, in kubelet process we will find that it knows the path of cni plugin configuration and the path of the binary.
+
+#### CNI Weave
+
+Weave create its own bridges in each node of the cluster, and deploys a daemonset of weave agents, each agent have an idea of the whole topology, and knows which network exists on which node, when a pod sends a packet to another packet pod, the weave agent intercepts the packet, check the destination address, if it's in another node, it encapsulate the packet and send it to the right node, then the other agent decapsulate the packet and send it to the right pod.
+
+#### IPAM (IP Address Management)
+
+Ip management differs from plugin to another, generally, plugins use a dhcp server to allocate and remove ip addresses and network options from pods, this is configured at cni configuration level.
+
+#### Service Networking
+
+In addition to node, and pod networking layers, k8s has an additional network level, which is service networking.
+
+As we know, pods are ephemeral, that's why we cannot configure a DB's pod ip in an application pod, cause it can change at any time, to solve this issue, we will create a service.
+
+Services has 3 types, clusterip, nodeport and loadbalancer.
+
+Services are virtual objects that exist only on `iptables|user space|IPVS` level, when we create a service, it selects all pods with specific labels, and add them as endpoints, and when a pod communicate to a service's ip, iptables redirects the packet to the pod's address based on redirection rules created by kube proxy. 
+
+#### DNS in kubernetes
+
+Dns in k8S helps resolving pods and services names, objects in the same namespace can reach each other only by specifying the name of the service.
+
+When resolving services in other namespaces, we have to specify the namespace name in addition to the service name `service.namespace`
+
+All services in the cluster are grouped into a subdomain called `svc`, so we can reach every service on `servicename.namespace.svc`
+
+Finally, all objects are grouped into a root domain called `cluster.local`, so the FQDN of a service will be `servicename.namespace.svc.cluster.local`
+
+For pods, k8s doesn't create records for them by default, when enabled, k8s uses the ip address of a pod, and replaces the dots with dashes and stores the records under `pod` subdomain.
+
+#### CoreDNS in kubernetes
+
+CoreDNS is deployed as a pod `2 instances` in kube-system namesapce, and serves dns records for all pods in the cluster.
+
+All pods are configured to point on the ip of coredns pod for name resolution, the configuration is done by kubelet.
+
+Coredns configuration is stored in a configmap at the same namespace, and uses `kubernetes` plugin to integrate with k8s.
+
+#### Ingress
+
+If wa want  to expose a service for the outside world, we would create a nodeport service that points to our service, if we have two services, we have to add an additional nodeport service, and to route traffic to both services, we have to add an external loadbalancer, and configure it.
+
+Instead of doing all these steps, we can deploy an Ingress controller, and expose it as a nodeport, and configure it with ingress resources to manage traffic inside our cluster.
+
+Kubernetes supports multiple Ingress controllers such as `Nginx`, `HAProxy`, `Contour`, `Istio` and `Traefik`
+
+After deploying the ingress controller, we have to create ingress controllers `configuration`, to manage requests routing, based on host, path..., and configure SSL.
+
+In our case, we will use Nginx as an example
+
+Nginx ingress controller is deployed as a deployment in k8s, it has a configmap that contains all the configuration, and has two env variables that defines the pod's name and namespace, and specifies the ports used by the pod, which are `80` and `443`
+
+Then, we need a nodeport service to expose the ingress controller to the outside world.
+
+The ingress controller watch the API for new ingress rules, and configures the nginx pod automatically, but it need a serviceaccount with the appropriate roles and rolebindngs to access the api server in order to do that.
+
+Ingress resources are a set of rules and configurations applied on the ingress controller, they are used to route traffic based on host, paths ..., ex:
+
+```
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: a-name
+spec:
+  backend:
+    serviceName: an-internal-service
+    servicePort: 80
+```
+
+This rule will route all trafficto the internal service.
+
+```
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: a-new-name
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /path1
+        backend:
+          serviceName: service1
+	  servicePort: 80
+      - path: /path2
+        backend:
+          serviceName: service2
+	  servicePort: 80
+```
+
+The section above create a rule that routes traffic to two different services based on the path
+
+```
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: a-second-name
+spec:
+  rules:
+  - host: abc.com
+    http:
+      paths:
+      - backend:
+          serviceName: service1
+          servicePort: 80
+  - host: xyz.com
+    http:
+      paths:
+      - backend:
+          serviceName: service2
+          servicePort: 80
+```
+
+The section above create a rule that routes traffic to two different services based on the host field
+
+Sometimes, we will have to rewrite the URL field in http requests before redirectinf them to the appropriate services, an annotation must be used to achieve this, ex:
+
+```
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: test-ingress
+  namespace: critical-space
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /pay
+        backend:
+          serviceName: pay-service
+          servicePort: 8282
+```
+
+This will rewrite all requests coming with `/pay` path with /
+
+### Design and install a k8s cluster
+
+#### Design a k8s cluster
+
+K8s design is based on purpose, for testing purpose, a single node cluster is sufficiant, solutions are minikube, kind ...
+
+For development cluster, a multi node cluster with single cluster is a good choice, these can be deployed with `kubeadm`
+
+For production grade clusters, we need a multi master cluster, it can be deployed on public clouds or on premise using kubespray.
+ 
+A cluster can support up to:
+
+	* 5000 nodes
+	* 150,000 pods
+	* 300,000 container
+	* 100 Pod per node
+
+#### Configure High Availability
+
+In production environments, we have to deploy a multimaster clusters, not all k8s components work in ha mode:
+
+* API Server: the only component that works in Active/Active mode, we can put a LB in front of our master nodes to perform healthceck.
+* Controller Manager: Works in Active/Passive mode, the leader acquires a lock and sends beats to other controller managers to let them know it is working properly.
+* Scheduler: Same as Controller Manager, only one instance can be active.
+* Etcd: is a distributed system by default, all members must be up & running.
+
+#### Etcd in High Availability
 
 
+Etcd stores the same copy of data on all cluster nodes.
 
+For reads, clients can read from any node on the cluster.
 
+Clients can only write through the `leader` node.
 
+The leader receives a write request and replicate it to other nodes, it acknowledges the write when the majority (quorum) of nodes confirms the write is done.
 
+Leader election is done using RAFT protocol, is send random timers to each node on the cluster, when the timer ends, the node notifies other nodes that it's the leader.
 
+### Install k8s cluster the kubeadm way
 
+```
+https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/
+```
 
+### End to end tests
 
+To run e2e tests on a k8s cluster:
 
+* Install golang
+* Get kubetest (go get k8s.io/test-infra/kubetest)
+* Extract your verions's tests (kubetest --extract=v1.20.0), this will create a `kubernetes` directory that containes the needed binaries to run the test
+* Cd into that directory and run (kubetest --test --provider=skeleton > testout.txt)
 
+With the `skeleton` provider is used, we must specify the `KUBE_MASTER_IP` and `KUBE_MASTER` env variables
 
+### Troubleshooting
 
+#### Application failure
 
+#### Control plane failure
 
+#### Worker node failure
 
+#### Network troubleshooting
 
+### Other topics
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Coupon : DCUBEOFFER

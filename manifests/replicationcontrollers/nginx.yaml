@@ -2,19 +2,27 @@ apiVersion: v1
 kind: ReplicationController
 metadata: 
   name: myapp-rc
+  namespace: onl
   labels: 
-    app: myapp
+    app: testapp
     type: frontend
 spec:
-  replicas: 3
+  replicas: 1
   template:
       metadata:
         name: myapp
         labels:
-          app: myapp         
+          app: testmyapp         
           type: frontend
       spec:
         containers:
          - name: nginx-container
-           image: nginx
-    
+           image: 10.1.90.12:8090/nginx:latest
+           resources:
+             requests:
+              memory: 0.5Gi
+              cpu: 1
+             limits:
+              memory: 1Gi
+              cpu: 2
+
