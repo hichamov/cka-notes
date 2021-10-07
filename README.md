@@ -1140,7 +1140,7 @@ spec:
 
 * OS Upgrades
 
-If a node is down, kubernetes waits for 5 minutes (pod eviction timeout), then, is the pods are part of a replicaset, creates the pods in another node
+If a node is down, kubernetes waits for 5 minutes (pod eviction timeout), then, if the pods are part of a replicaset, creates the pods in another node
 
 'Pod Eviction Timeout' is a paramater of the controller manager component 'default: --pod-eviction-timeout=5m0s'
 
@@ -1208,22 +1208,28 @@ kubeadm upgrade plan
  
 This command will give us all the infos and steps needed to upgrade the cluster
 
+Before proceeding in component upgrading, we will update system sources
+
+```
+apt update
+```
+
 the first step is to upgrade the kubeadm itself
 
 ```
-apt-get upgrade -y kubeadm=1.19.0-00
+apt-get upgrade  kubeadm=1.20.0-00
 ```
 
 Then, upgrade the control plan
 
 ```
-kubeadm upgrade apply v1.19.0
+kubeadm upgrade apply v1.20.0
 ```
 
 Then upgrade the kubelet on all nodes manually
 
 ```
-apt-get upgrade -y kubelet=1.19.0-00
+apt-get upgrade kubelet=1.20.0-00
 systemctl restart kubelet
 ```
 
@@ -1236,13 +1242,14 @@ kubectl drain nodename
 Then, upgrade kubeadm and kubelet on the worker node
 
 ```
-apt-get upgrade -y kubeadm=1.19.1-00
-apt-get upgrade -y kubelet=1.19.0-00
-kubeadm upgrade node config --kubelet-version v1.19.0
-systemctl restart kubectl
+apt update
+apt install kubeadm=1.20.0-00
+kubeadm upgrade node
+apt install kubelet=1.20.0-00
+systemctl restart kubelet
 ```
 
-Finally, we'll undrain the node
+Finally, we'll uncordon the node
 
 ```
 kubectl uncordon nodename
@@ -1273,7 +1280,11 @@ We have to backup the datadir of etcd, default is '/var/lib/etcd'
 Or backup the database using the ETCDCTL utility:
 
 ```
-ETCDCTL_API=3 etcdctl snapshot save snapshot.db
+ETCDCTL_API=3 etcdctl --endpoints=https://[127.0.0.1]:2379 \
+--cacert=/etc/kubernetes/pki/etcd/ca.crt \
+--cert=/etc/kubernetes/pki/etcd/server.crt \
+--key=/etc/kubernetes/pki/etcd/server.key \
+snapshot save /opt/snapshot-pre-boot.db
 ```
 
 we can see the status of the backup:
@@ -1285,10 +1296,11 @@ ETCDCTL_API=3 etcdctl snapshot status snapshot.db
 To restore the cluster from this backup, stop the kube-apiserver service, then, run the following command
 
 ```
-ETCDCTL_API=3 etcdctl snapshot restore snapshot.db --data-dir /var/lib/etcd-from-backup 
+ETCDCTL_API=3 etcdctl  --data-dir /var/lib/etcd-from-backup \
+snapshot restore /opt/snapshot-pre-boot.db
 ```
 
-& then, edit etcd config file, to use the new data directory, and make sure you set the new directory at data dir and volume parameters, then reload the etcd service & kube-apiserver
+& then, edit etcd config file,at the volume level, to use the new data directory, and make sure you set the new directory at data dir and volume parameters, then reload the etcd service & kube-apiserver
 
 Each way of these two are used in separate environments, for managed services, it's recommended to backup the manifests
 
@@ -2345,3 +2357,239 @@ With the `skeleton` provider is used, we must specify the `KUBE_MASTER_IP` and `
 
 ### Other topics
 
+#### YAML
+
+YAML is a data structure format, it's used to represent data.
+
+The basic form of data is key value pair:
+
+```
+key: value
+```
+
+Arrays:
+
+```
+Fruits:
+- Mango
+- Orange
+- Avocado
+```
+
+Dictionnary:
+
+```
+devops
+  Age: 32
+  Name: Hicham
+  weight: 82
+```
+
+YAML relies on spaces, so if we add spaces to the previous example:
+
+```
+devops
+  Age: 32
+   Name: Hicham
+   weight: 82
+```
+
+Name and weight will fall under Age and not devops.
+
+The previous data types can be combined, so a list can contain a dictionary, ex:
+
+```
+Fruits:
+- Banana:
+    calories: 20
+    carbs: 30
+- Mango:
+    calories: 20
+    carbs: 30
+```
+
+The order is not important in yaml dictionaries, which is not the same for lists, lists respects order.
+
+Comments are started with a '#'
+
+#### JSON PATH
+
+JSON is a data structure format, it's used to represent data.
+
+List: we use [] to define a list in json, each item in the list begins with '{' and end with '},'
+Dictionary: we use {} to define a dictionary in json
+
+JSON PATH is a query language for Json, like sql for relational databases.
+
+* Doctionaries
+
+A basic query looks like:
+
+```
+{
+  "car": {
+    "color": "red"
+    "price": "70000"
+  }
+}
+```
+
+Query: 
+
+```
+car
+```
+
+will retrieve the element car with all attributes, if we want to retrieve one specific attribute, for ex, the color:
+
+```
+car.color
+```
+
+Notice that all dictionaries (car & bus) are encapsulated in a root dictionary, we can reffer to the root element with a $ sign, ex:
+
+```
+$.car.color
+```
+
+All resulsts of json path queries are encapsulated in [], this means that they are inside a list.
+
+* Lists
+
+Ex of a list:
+
+```
+[
+  "car",
+  "bus",
+  "truck",
+  "bike"
+]
+```
+
+To retrieve an element from the list, use $[indexnumber], indexes starts from 0, so $[0] will return the first element, to retrieve two or more element $[0,3]
+
+This query retrieves the first element ina dictionary whice is an element of a list called wheels, whiche resides in a dictionary called car:
+
+```
+$.car.wheels[1].model
+```
+
+* Critirea
+
+Until now, we were using simple queries, we can add critirea to create more complex queries, for ex, retrieve all numbers greater than 40
+
+Data:
+
+```
+[
+  23,
+  89,
+  8,
+  888,
+  0,
+  21
+]
+```
+
+Query:
+
+```
+$[?( @ > 40)]
+```
+
+?(): means that we want to specify a critirea
+@: an iterable element means each item in the list
+> 40: the critirea
+
+Other operators:
+
+==: equal
+!=: not equal
+in[1,2,3]: in range
+nin[1,2,3]: not in range 
+
+
+$.car.wheels[?( @.location == "rear-right")].model
+
+* Wildcards
+
+Until now, we retrieved specific attributes from ONE parent attribute, for ex, the color of the first car, what if we want to retrieve the color field from all elements.
+
+'*' is used to indicate any element: 
+
+```
+$.*.color
+```
+
+will retrieve the color field from all element of the dictionary
+
+* Advanced Lists
+
+To retrieve a range of elements from a list:
+
+```
+$[0:3]
+```
+
+Notice that this will return first to 4th element (4th element not included)
+
+We can specify a step:
+
+```
+$[0:8:2]
+```
+
+This will increment the counter each time by the step value (0,2,4,6,8)
+
+To retrieve the last element of the list:
+
+```
+$[-1]
+```
+
+This implementation doesn't work on all json versions, on other version we need to specify a range:
+
+```
+$[-1:0]
+$[-1:]
+$[-3:]
+```
+
+this means from last to first, with 1st not included.
+
+* Json PATH in kubernetes
+
+Json Path helps us format the output of kubectl command to create a report like output:
+
+Here is an example that outputs the image if pods:
+
+```
+kubectl get pods -o=jsonpath='{.items[0]spec.containers[0].name}{.items[0]spec.containers[0].image}'
+```
+
+We can combine multiple queries in the same command
+
+To sperate the output of the two commands, we can add \n:
+
+```
+kubectl get pods -o=jsonpath='{.items[0]spec.containers[0].name}{"\n"}{.items[0]spec.containers[0].image}'
+```
+
+We can use loops to iterate over the element outputed by kubectl command.
+
+```
+kubectl get nodes -o=jsonpath='{range items[*]}{.metadata.name} {"\t"} {.status.capacity.cpu}{"\n"}{end}'
+```
+
+An easier way to do this, is to use the custom-columns option with kubectl:
+
+```
+kubectl get nodes -o=custom-columns=NODE:.metadata.name ,CPU:.status.capacity.cpu 
+```
+
+We can even sort the output based on the values of a specific field:
+
+```
+kubectl get nodes --sort-by=.status.capacity.cpu
+```
