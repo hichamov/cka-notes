@@ -485,8 +485,6 @@ Both techniques can be combined to dedicate specific nodes to specific pods and 
 
 Resources are specified on three sections (CPU, Memory & storage), the scheduler looks for a node with sufficient resources beforse affecting a pod to a node, if no node has the necessary amount of resources, the pod remains in 'Pending' state, 
 
-By default, k8s assumes each container in a pod requires 0.5 CPU and 256 Mi memory, this is called Resource Requests, to modify the request resources:
-
   
 ```
 apiVersion: v1
